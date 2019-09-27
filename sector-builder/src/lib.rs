@@ -15,6 +15,7 @@ pub use crate::helpers::checksum::calculate_checksum;
 pub use crate::metadata::*;
 pub use crate::metadata_manager::*;
 pub use crate::store::*;
+pub use crate::simple_builder::*;
 
 mod builder;
 mod constants;
@@ -28,3 +29,5 @@ mod scheduler;
 mod state;
 mod store;
 mod worker;
+
+mod simple_builder;

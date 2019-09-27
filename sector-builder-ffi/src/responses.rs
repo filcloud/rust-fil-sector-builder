@@ -8,7 +8,7 @@ use ffi_toolkit::free_c_str;
 use libc;
 use sector_builder::{SealedSectorHealth, SectorBuilderErr, SectorManagerErr};
 
-use crate::api::SectorBuilder;
+use crate::api::{SectorBuilder, SimpleSectorBuilder};
 
 #[repr(C)]
 #[derive(PartialEq, Debug)]
@@ -53,7 +53,6 @@ pub enum FFISealStatus {
 ///////////////////////////////////////////////////////////////////////////////
 /// GeneratePoSTResult
 //////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GeneratePoStResponse {
@@ -105,7 +104,6 @@ pub fn err_code_and_msg(err: &Error) -> (FCPResponseStatus, *const libc::c_char)
 ///////////////////////////////////////////////////////////////////////////////
 /// InitSectorBuilderResponse
 /////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct InitSectorBuilderResponse {
@@ -124,10 +122,27 @@ impl Default for InitSectorBuilderResponse {
     }
 }
 
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct InitSimpleSectorBuilderResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_builder: *mut SimpleSectorBuilder,
+}
+
+impl Default for InitSimpleSectorBuilderResponse {
+    fn default() -> InitSimpleSectorBuilderResponse {
+        InitSimpleSectorBuilderResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_builder: ptr::null_mut(),
+        }
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 /// AddPieceResponse
 ////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct AddPieceResponse {
@@ -146,10 +161,125 @@ impl Default for AddPieceResponse {
     }
 }
 
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct AddPieceFirstResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_id: u64,
+}
+
+impl Default for AddPieceFirstResponse {
+    fn default() -> AddPieceFirstResponse {
+        AddPieceFirstResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_id: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct AddPieceSecondResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_ptr: *const FFIPendingStagedSectorMetadata,
+    pub sector_len: libc::size_t,
+}
+
+impl Default for AddPieceSecondResponse {
+    fn default() -> AddPieceSecondResponse {
+        AddPieceSecondResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_ptr: ptr::null(),
+            sector_len: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct FFIPendingStagedSectorMetadata {
+    pub sector_access: *const libc::c_char,
+    pub sector_id: u64,
+    pub pieces_len: libc::size_t,
+    pub pieces_ptr: *const FFIPieceMetadata,
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct SealStagedSectorResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_ptr: *const FFISealedSectorMetadata,
+    pub sector_len: libc::size_t,
+}
+
+impl Default for SealStagedSectorResponse {
+    fn default() -> SealStagedSectorResponse {
+        SealStagedSectorResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_ptr: ptr::null(),
+            sector_len: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct GeneratePoStFirstResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+
+    pub challenges_ptr: *const FFIChallenge,
+    pub challenges_len: libc::size_t,
+}
+
+impl Default for GeneratePoStFirstResponse {
+    fn default() -> GeneratePoStFirstResponse {
+        GeneratePoStFirstResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            challenges_ptr: ptr::null(),
+            challenges_len: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct FFIChallenge {
+    pub sector: u64,
+    pub leaf: u64,
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct GetSectorsReadyForSealingResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+
+    pub sector_ids_ptr: *const u64,
+    pub sector_ids_len: libc::size_t,
+}
+
+impl Default for GetSectorsReadyForSealingResponse {
+    fn default() -> GetSectorsReadyForSealingResponse {
+        GetSectorsReadyForSealingResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_ids_ptr: ptr::null(),
+            sector_ids_len: 0,
+        }
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// ReadPieceFromSealedSectorResponse
 /////////////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct ReadPieceFromSealedSectorResponse {
@@ -173,7 +303,6 @@ impl Default for ReadPieceFromSealedSectorResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// SealAllStagedSectorsResponse
 ////////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct SealAllStagedSectorsResponse {
@@ -193,7 +322,6 @@ impl Default for SealAllStagedSectorsResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// GetSealStatusResponse
 /////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GetSealStatusResponse {
@@ -250,7 +378,6 @@ impl Default for GetSealStatusResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// FFIStagedSectorMetadata
 ///////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct FFIStagedSectorMetadata {
@@ -269,7 +396,6 @@ pub struct FFIStagedSectorMetadata {
 ///////////////////////////////////////////////////////////////////////////////
 /// FFISealedSectorMetadata
 ///////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct FFISealedSectorMetadata {
@@ -288,7 +414,6 @@ pub struct FFISealedSectorMetadata {
 ///////////////////////////////////////////////////////////////////////////////
 /// GetSealedSectorsResponse
 ////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GetSealedSectorsResponse {
@@ -313,7 +438,6 @@ impl Default for GetSealedSectorsResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// GetStagedSectorsResponse
 ////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GetStagedSectorsResponse {

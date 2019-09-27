@@ -58,10 +58,54 @@ pub trait SectorManager: Sync + Send {
     ) -> Result<Vec<u8>, SectorManagerErr>;
 }
 
+pub trait SimpleSectorManager: Sync + Send {
+    /// produce the path to the file associated with sealed sector access-token
+    fn sealed_sector_path(&self, miner: &str, access: &str) -> PathBuf;
+
+    /// produce the path to the file associated with staged sector access-token
+    fn staged_sector_path(&self, miner: &str, access: &str) -> PathBuf;
+
+    /// provisions a new sealed sector with the sector_id and reports the corresponding access
+    fn new_sealed_sector_access(&self, miner: &str, sector_id: SectorId) -> Result<String, SectorManagerErr>;
+
+    /// provisions a new staging sector and reports the corresponding access
+    fn new_staging_sector_access(&self, miner: &str, sector_id: SectorId, create: bool) -> Result<String, SectorManagerErr>;
+
+    /// reports the number of bytes written to an unsealed sector
+    fn num_unsealed_bytes(&self, miner: &str, access: &str) -> Result<u64, SectorManagerErr>;
+
+    /// sets the number of bytes in an unsealed sector identified by `access`
+    fn truncate_unsealed(&self, miner: &str, access: &str, size: u64) -> Result<(), SectorManagerErr>;
+
+    /// writes `data` to the staging sector identified by `access`, incrementally preprocessing `access`
+    fn write_and_preprocess(
+        &self,
+        miner: &str,
+        access: &str,
+        data: &mut dyn Read,
+    ) -> Result<UnpaddedBytesAmount, SectorManagerErr>;
+
+    fn delete_staging_sector_access(&self, miner: &str, access: &str) -> Result<(), SectorManagerErr>;
+
+    fn read_raw(
+        &self,
+        miner: &str,
+        access: &str,
+        start_offset: u64,
+        num_bytes: UnpaddedBytesAmount,
+    ) -> Result<Vec<u8>, SectorManagerErr>;
+}
+
 pub trait SectorStore: Sync + Send + Sized {
     fn sector_config(&self) -> &dyn SectorConfig;
     fn proofs_config(&self) -> &dyn ProofsConfig;
     fn manager(&self) -> &dyn SectorManager;
+}
+
+pub trait SimpleSectorStore: Sync + Send + Sized {
+    fn sector_config(&self) -> &dyn SectorConfig;
+    fn proofs_config(&self) -> &dyn ProofsConfig;
+    fn manager(&self) -> &dyn SimpleSectorManager;
 }
 
 #[cfg(test)]
