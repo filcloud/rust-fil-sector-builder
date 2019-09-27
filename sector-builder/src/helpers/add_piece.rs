@@ -8,7 +8,8 @@ use filecoin_proofs::types::UnpaddedBytesAmount;
 use crate::error::*;
 use crate::metadata::{self, SealStatus, SecondsSinceEpoch, StagedSectorMetadata};
 use crate::state::SectorBuilderState;
-use crate::store::{SectorManager, SectorStore};
+use crate::state::StagedState;
+use crate::store::{SectorManager, SectorStore, SimpleSectorManager, SimpleSectorStore};
 use storage_proofs::sector::SectorId;
 
 pub fn add_piece<S: SectorStore>(
@@ -75,6 +76,77 @@ pub fn add_piece<S: SectorStore>(
     }
 }
 
+pub fn add_piece_first<S: SimpleSectorStore>(
+    sector_store: &S,
+    miner: &str,
+    mut staged_state: &mut StagedState,
+    piece_bytes_amount: u64,
+    new_sector_id: SectorId,
+) -> Result<SectorId> {
+    let sector_mgr = sector_store.manager();
+    let sector_max = sector_store.sector_config().max_unsealed_bytes_per_sector();
+
+    let piece_bytes_len = UnpaddedBytesAmount(piece_bytes_amount);
+
+    let opt_dest_sector_id = {
+        let candidates: Vec<StagedSectorMetadata> = staged_state
+            .sectors
+            .iter()
+            .filter(|(_, v)| v.seal_status == SealStatus::Pending)
+            .map(|(_, v)| (*v).clone())
+            .collect();
+
+        compute_destination_sector_id(&candidates, sector_max, piece_bytes_len)?
+    };
+
+    opt_dest_sector_id
+        .ok_or(())
+        .or_else(|_| simple_provision_new_staged_sector(sector_mgr, &mut staged_state, miner, new_sector_id))
+}
+
+pub fn add_piece_second<S: SimpleSectorStore>(
+    sector_store: &S,
+    miner: &str,
+    mut sector: StagedSectorMetadata,
+    piece_bytes_amount: u64,
+    piece_key: String,
+    piece_file: impl std::io::Read,
+) -> Result<StagedSectorMetadata> {
+    sector_store.manager().new_staging_sector_access(miner, sector.sector_id, true)?;
+
+    let piece_bytes_len = UnpaddedBytesAmount(piece_bytes_amount);
+
+    let piece_lengths: Vec<_> = sector.pieces.iter().map(|p| p.num_bytes).collect();
+
+    let (expected_num_bytes_written, mut chain) =
+        get_aligned_source(piece_file, &piece_lengths, piece_bytes_len);
+
+    sector_store
+        .manager()
+        .write_and_preprocess(miner, &sector.sector_access, &mut chain)
+        .map_err(Into::into)
+        .and_then(|num_bytes_written| {
+            if num_bytes_written != expected_num_bytes_written {
+                Err(
+                    err_inc_write(u64::from(num_bytes_written), u64::from(piece_bytes_len))
+                        .into(),
+                )
+            } else {
+                Ok(sector.sector_id)
+            }
+        })
+        .map(|_| {
+            sector.pieces.push(metadata::PieceMetadata {
+                piece_key,
+                num_bytes: piece_bytes_len,
+                comm_p: None,
+                piece_inclusion_proof: None,
+            });
+
+            sector
+        })
+}
+
 // Given a list of staged sectors which are accepting data, return the
 // first staged sector into which the bytes will fit.
 fn compute_destination_sector_id(
@@ -131,6 +203,28 @@ fn provision_new_staged_sector(
         .staged
         .sectors
         .insert(meta.sector_id, meta.clone());
+
+    Ok(sector_id)
+}
+
+fn simple_provision_new_staged_sector(
+    sector_manager: &dyn SimpleSectorManager,
+    staged_state: &mut StagedState,
+    miner: &str,
+    new_sector_id: SectorId,
+) -> Result<SectorId> {
+    let sector_id = new_sector_id;
+
+    let access = sector_manager.new_staging_sector_access(miner, sector_id, false)?;
+
+    let meta = StagedSectorMetadata {
+        pieces: Default::default(),
+        sector_access: access.clone(),
+        sector_id,
+        seal_status: SealStatus::Pending,
+    };
+
+    staged_state.sectors.insert(meta.sector_id, meta.clone());
 
     Ok(sector_id)
 }

@@ -8,7 +8,7 @@ use filecoin_proofs::fr32::{
 use filecoin_proofs::types::*;
 
 use crate::error::SectorManagerErr;
-use crate::store::{ProofsConfig, SectorConfig, SectorManager, SectorStore};
+use crate::store::{ProofsConfig, SectorConfig, SectorManager, SimpleSectorManager, SectorStore, SimpleSectorStore};
 use storage_proofs::sector::SectorId;
 
 // This is a segmented sectorid expression protocol, to support meaningful sector name on disk
@@ -39,8 +39,20 @@ pub struct DiskManager {
     sector_segment_id: u32,
 }
 
+pub struct SimpleDiskManager {
+    d: DiskManager,
+}
+
 fn sector_path<P: AsRef<Path>>(sector_dir: P, access: &str) -> PathBuf {
     let mut file_path = PathBuf::from(sector_dir.as_ref());
+    file_path.push(access);
+
+    file_path
+}
+
+fn simple_sector_path<P: AsRef<Path>>(sector_dir: P, miner: &str, access: &str) -> PathBuf {
+    let mut file_path = PathBuf::from(sector_dir.as_ref());
+    file_path.push(miner);
     file_path.push(access);
 
     file_path
@@ -80,16 +92,16 @@ impl SectorManager for DiskManager {
         match OpenOptions::new()
             .write(true)
             .open(self.staged_sector_path(access))
-        {
-            Ok(mut file) => match almost_truncate_to_unpadded_bytes(&mut file, size) {
-                Ok(padded_size) => match file.set_len(padded_size as u64) {
-                    Ok(_) => Ok(()),
+            {
+                Ok(mut file) => match almost_truncate_to_unpadded_bytes(&mut file, size) {
+                    Ok(padded_size) => match file.set_len(padded_size as u64) {
+                        Ok(_) => Ok(()),
+                        Err(err) => Err(SectorManagerErr::ReceiverError(format!("{:?}", err))),
+                    },
                     Err(err) => Err(SectorManagerErr::ReceiverError(format!("{:?}", err))),
                 },
-                Err(err) => Err(SectorManagerErr::ReceiverError(format!("{:?}", err))),
-            },
-            Err(err) => Err(SectorManagerErr::CallerError(format!("{:?}", err))),
-        }
+                Err(err) => Err(SectorManagerErr::CallerError(format!("{:?}", err))),
+            }
     }
 
     // TODO: write_and_preprocess should refuse to write more data than will fit. In that case, return 0.
@@ -139,6 +151,105 @@ impl SectorManager for DiskManager {
     }
 }
 
+impl SimpleSectorManager for SimpleDiskManager {
+    fn sealed_sector_path(&self, miner: &str, access: &str) -> PathBuf {
+        simple_sector_path(&self.d.sealed_path, miner, access)
+    }
+
+    fn staged_sector_path(&self, miner: &str, access: &str) -> PathBuf {
+        simple_sector_path(&self.d.staging_path, miner, access)
+    }
+
+    fn new_sealed_sector_access(&self, miner: &str, sector_id: SectorId) -> Result<String, SectorManagerErr> {
+        self.d.new_sector_access(&Path::new(&self.d.sealed_path).join(miner), sector_id)
+    }
+
+    fn new_staging_sector_access(&self, miner: &str, sector_id: SectorId, create: bool) -> Result<String, SectorManagerErr> {
+        if create {
+            self.d.new_sector_access(&Path::new(&self.d.staging_path).join(miner), sector_id)
+        } else {
+            self.d.new_sector_access_nocreate(sector_id)
+        }
+    }
+
+    fn num_unsealed_bytes(&self, miner: &str, access: &str) -> Result<u64, SectorManagerErr> {
+        OpenOptions::new()
+            .read(true)
+            .open(self.staged_sector_path(miner, access))
+            .map_err(|err| SectorManagerErr::CallerError(format!("{:?}", err)))
+            .map(|mut f| {
+                target_unpadded_bytes(&mut f)
+                    .map_err(|err| SectorManagerErr::ReceiverError(format!("{:?}", err)))
+            })
+            .and_then(|n| n)
+    }
+
+    fn truncate_unsealed(&self, miner: &str, access: &str, size: u64) -> Result<(), SectorManagerErr> {
+        // I couldn't wrap my head around all ths result mapping, so here it is all laid out.
+        match OpenOptions::new()
+            .write(true)
+            .open(self.staged_sector_path(miner, access))
+            {
+                Ok(mut file) => match almost_truncate_to_unpadded_bytes(&mut file, size) {
+                    Ok(padded_size) => match file.set_len(padded_size as u64) {
+                        Ok(_) => Ok(()),
+                        Err(err) => Err(SectorManagerErr::ReceiverError(format!("{:?}", err))),
+                    },
+                    Err(err) => Err(SectorManagerErr::ReceiverError(format!("{:?}", err))),
+                },
+                Err(err) => Err(SectorManagerErr::CallerError(format!("{:?}", err))),
+            }
+    }
+
+    // TODO: write_and_preprocess should refuse to write more data than will fit. In that case, return 0.
+    fn write_and_preprocess(
+        &self,
+        miner: &str,
+        access: &str,
+        data: &mut dyn Read,
+    ) -> Result<UnpaddedBytesAmount, SectorManagerErr> {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.staged_sector_path(miner, access))
+            .map_err(|err| SectorManagerErr::CallerError(format!("{:?}", err)))
+            .and_then(|mut file| {
+                write_padded(data, &mut file)
+                    .map_err(|err| SectorManagerErr::ReceiverError(format!("{:?}", err)))
+                    .map(|n| UnpaddedBytesAmount(n as u64))
+            })
+    }
+
+    fn delete_staging_sector_access(&self, miner: &str, access: &str) -> Result<(), SectorManagerErr> {
+        remove_file(self.staged_sector_path(miner, access))
+            .map_err(|err| SectorManagerErr::CallerError(format!("{:?}", err)))
+    }
+
+    fn read_raw(
+        &self,
+        miner: &str,
+        access: &str,
+        start_offset: u64,
+        num_bytes: UnpaddedBytesAmount,
+    ) -> Result<Vec<u8>, SectorManagerErr> {
+        OpenOptions::new()
+            .read(true)
+            .open(self.staged_sector_path(miner, access))
+            .map_err(|err| SectorManagerErr::CallerError(format!("{:?}", err)))
+            .and_then(|mut file| -> Result<Vec<u8>, SectorManagerErr> {
+                file.seek(SeekFrom::Start(start_offset))
+                    .map_err(|err| SectorManagerErr::CallerError(format!("{:?}", err)))?;
+
+                let mut buf = vec![0; usize::from(num_bytes)];
+
+                file.read_exact(buf.as_mut_slice())
+                    .map_err(|err| SectorManagerErr::CallerError(format!("{:?}", err)))?;
+
+                Ok(buf)
+            })
+    }
+}
+
 impl DiskManager {
     fn new_sector_access(
         &self,
@@ -156,6 +267,13 @@ impl DiskManager {
                     .map_err(|err| SectorManagerErr::ReceiverError(format!("{:?}", err)))
             })
             .map(|_| access)
+    }
+
+    fn new_sector_access_nocreate(
+        &self,
+        sector_id: SectorId,
+    ) -> Result<String, SectorManagerErr> {
+        self.convert_sector_id_to_access_name(sector_id)
     }
 
     fn convert_sector_id_to_access_name(
@@ -334,6 +452,12 @@ pub struct ConcreteSectorStore {
     manager: Box<dyn SectorManager>,
 }
 
+pub struct SimpleConcreteSectorStore {
+    proofs_config: Box<dyn ProofsConfig>,
+    sector_config: Box<dyn SectorConfig>,
+    manager: Box<dyn SimpleSectorManager>,
+}
+
 impl SectorStore for ConcreteSectorStore {
     fn sector_config(&self) -> &dyn SectorConfig {
         self.sector_config.as_ref()
@@ -344,6 +468,20 @@ impl SectorStore for ConcreteSectorStore {
     }
 
     fn manager(&self) -> &dyn SectorManager {
+        self.manager.as_ref()
+    }
+}
+
+impl SimpleSectorStore for SimpleConcreteSectorStore {
+    fn sector_config(&self) -> &dyn SectorConfig {
+        self.sector_config.as_ref()
+    }
+
+    fn proofs_config(&self) -> &dyn ProofsConfig {
+        self.proofs_config.as_ref()
+    }
+
+    fn manager(&self) -> &dyn SimpleSectorManager {
         self.manager.as_ref()
     }
 }
@@ -367,6 +505,33 @@ pub fn new_sector_store(
     let proofs_config = Box::new(Config::from(sector_class));
 
     ConcreteSectorStore {
+        proofs_config,
+        sector_config,
+        manager,
+    }
+}
+
+pub fn new_simple_sector_store(
+    sector_class: SectorClass,
+    sealed_sector_dir: impl AsRef<Path>,
+    staged_sector_dir: impl AsRef<Path>,
+) -> SimpleConcreteSectorStore {
+    // By default, support on-000000000000-dddddddddd format
+    let default_access_proto = SectorAccessProto::Original(0);
+
+    let manager = Box::new(SimpleDiskManager {
+        d: DiskManager {
+            staging_path: staged_sector_dir.as_ref().to_owned(),
+            sealed_path: sealed_sector_dir.as_ref().to_owned(),
+            sector_access_proto: default_access_proto,
+            sector_segment_id: 0u32,
+        },
+    });
+
+    let sector_config = Box::new(Config::from(sector_class));
+    let proofs_config = Box::new(Config::from(sector_class));
+
+    SimpleConcreteSectorStore {
         proofs_config,
         sector_config,
         manager,

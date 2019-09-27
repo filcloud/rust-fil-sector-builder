@@ -249,7 +249,7 @@ impl<T: Read + Send> Drop for SectorBuilder<T> {
 
 /// Checks the parameter cache for the given sector size.
 /// Returns an `Err` if it is not hydrated.
-fn ensure_parameter_cache_hydrated(sector_class: SectorClass) -> Result<()> {
+pub fn ensure_parameter_cache_hydrated(sector_class: SectorClass) -> Result<()> {
     // PoRep
     let porep_config: PoRepConfig = sector_class.into();
 

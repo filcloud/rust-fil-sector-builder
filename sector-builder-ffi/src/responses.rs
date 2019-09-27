@@ -10,7 +10,8 @@ use sector_builder::{
     PieceMetadata, SealedSectorHealth, SealedSectorMetadata, SectorBuilderErr, SectorManagerErr,
 };
 
-use crate::api::{FFISealTicket, SectorBuilder};
+use crate::api::{FFISealTicket, SectorBuilder, SimpleSectorBuilder};
+use storage_proofs::hasher::Domain;
 
 #[repr(C)]
 #[derive(PartialEq, Debug)]
@@ -57,7 +58,6 @@ pub enum FFISealStatus {
 ///////////////////////////////////////////////////////////////////////////////
 /// GeneratePoSTResult
 //////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GeneratePoStResponse {
@@ -109,7 +109,6 @@ pub fn err_code_and_msg(err: &Error) -> (FCPResponseStatus, *const libc::c_char)
 ///////////////////////////////////////////////////////////////////////////////
 /// InitSectorBuilderResponse
 /////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct InitSectorBuilderResponse {
@@ -128,10 +127,27 @@ impl Default for InitSectorBuilderResponse {
     }
 }
 
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct InitSimpleSectorBuilderResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_builder: *mut SimpleSectorBuilder,
+}
+
+impl Default for InitSimpleSectorBuilderResponse {
+    fn default() -> InitSimpleSectorBuilderResponse {
+        InitSimpleSectorBuilderResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_builder: ptr::null_mut(),
+        }
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 /// ResumeSealSectorResponse
 ////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct ResumeSealSectorResponse {
@@ -153,7 +169,6 @@ impl Default for ResumeSealSectorResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// SealSectorResponse
 //////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct SealSectorResponse {
@@ -175,7 +190,6 @@ impl Default for SealSectorResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// AddPieceResponse
 ////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct AddPieceResponse {
@@ -194,10 +208,125 @@ impl Default for AddPieceResponse {
     }
 }
 
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct AddPieceFirstResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_id: u64,
+}
+
+impl Default for AddPieceFirstResponse {
+    fn default() -> AddPieceFirstResponse {
+        AddPieceFirstResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_id: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct AddPieceSecondResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_ptr: *const FFIPendingStagedSectorMetadata,
+    pub sector_len: libc::size_t,
+}
+
+impl Default for AddPieceSecondResponse {
+    fn default() -> AddPieceSecondResponse {
+        AddPieceSecondResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_ptr: ptr::null(),
+            sector_len: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct FFIPendingStagedSectorMetadata {
+    pub sector_access: *const libc::c_char,
+    pub sector_id: u64,
+    pub pieces_len: libc::size_t,
+    pub pieces_ptr: *const FFIPieceMetadata,
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct SealStagedSectorResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+    pub sector_ptr: *const FFISealedSectorMetadata,
+    pub sector_len: libc::size_t,
+}
+
+impl Default for SealStagedSectorResponse {
+    fn default() -> SealStagedSectorResponse {
+        SealStagedSectorResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_ptr: ptr::null(),
+            sector_len: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct GeneratePoStFirstResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+
+    pub challenges_ptr: *const FFIChallenge,
+    pub challenges_len: libc::size_t,
+}
+
+impl Default for GeneratePoStFirstResponse {
+    fn default() -> GeneratePoStFirstResponse {
+        GeneratePoStFirstResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            challenges_ptr: ptr::null(),
+            challenges_len: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct FFIChallenge {
+    pub sector: u64,
+    pub leaf: u64,
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct GetSectorsReadyForSealingResponse {
+    pub status_code: FCPResponseStatus,
+    pub error_msg: *const libc::c_char,
+
+    pub sector_ids_ptr: *const u64,
+    pub sector_ids_len: libc::size_t,
+}
+
+impl Default for GetSectorsReadyForSealingResponse {
+    fn default() -> GetSectorsReadyForSealingResponse {
+        GetSectorsReadyForSealingResponse {
+            status_code: FCPResponseStatus::FCPNoError,
+            error_msg: ptr::null(),
+            sector_ids_ptr: ptr::null(),
+            sector_ids_len: 0,
+        }
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// ReadPieceFromSealedSectorResponse
 /////////////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct ReadPieceFromSealedSectorResponse {
@@ -221,7 +350,6 @@ impl Default for ReadPieceFromSealedSectorResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// SealAllStagedSectorsResponse
 ////////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct SealAllStagedSectorsResponse {
@@ -245,7 +373,6 @@ impl Default for SealAllStagedSectorsResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// GetSealStatusResponse
 /////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GetSealStatusResponse {
@@ -331,7 +458,6 @@ impl Default for GetSealStatusResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// FFIStagedSectorMetadata
 ///////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct FFIStagedSectorMetadata {
@@ -350,7 +476,6 @@ pub struct FFIStagedSectorMetadata {
 ///////////////////////////////////////////////////////////////////////////////
 /// FFISealedSectorMetadata
 ///////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct FFISealedSectorMetadata {
@@ -361,9 +486,19 @@ pub struct FFISealedSectorMetadata {
     pub pieces_ptr: *const FFIPieceMetadata,
     pub proofs_len: libc::size_t,
     pub proofs_ptr: *const u8,
+    pub p_aux: FFIPersistentAux,
     pub seal_ticket: FFISealTicket,
     pub sector_access: *const libc::c_char,
     pub sector_id: u64,
+}
+
+#[repr(C)]
+#[derive(DropStructMacro)]
+pub struct FFIPersistentAux {
+    pub comm_c_len: libc::size_t,
+    pub comm_c_ptr: *const u8,
+    pub comm_r_last_len: libc::size_t,
+    pub comm_r_last_ptr: *const u8,
 }
 
 impl From<SealedSectorMetadata> for FFISealedSectorMetadata {
@@ -376,6 +511,17 @@ impl From<SealedSectorMetadata> for FFISealedSectorMetadata {
 
         let snark_proof = meta.proof.clone();
 
+        let comm_c = meta.p_aux.comm_c.into_bytes().clone();
+        let comm_r_last = meta.p_aux.comm_r_last.into_bytes().clone();
+        let p_aux = FFIPersistentAux {
+            comm_c_len: comm_c.len(),
+            comm_c_ptr: comm_c.as_ptr(),
+            comm_r_last_len: comm_r_last.len(),
+            comm_r_last_ptr: comm_r_last.as_ptr(),
+        };
+        mem::forget(comm_c);
+        mem::forget(comm_r_last);
+
         let sector = FFISealedSectorMetadata {
             seal_ticket: FFISealTicket {
                 block_height: meta.seal_ticket.block_height,
@@ -387,6 +533,7 @@ impl From<SealedSectorMetadata> for FFISealedSectorMetadata {
             pieces_ptr: pieces.as_ptr(),
             proofs_len: snark_proof.len(),
             proofs_ptr: snark_proof.as_ptr(),
+            p_aux,
             sector_access: rust_str_to_c_str(meta.sector_access.clone()),
             sector_id: u64::from(meta.sector_id),
             health: FFISealedSectorHealth::Unknown,
@@ -402,7 +549,6 @@ impl From<SealedSectorMetadata> for FFISealedSectorMetadata {
 ///////////////////////////////////////////////////////////////////////////////
 /// GetSealedSectorsResponse
 ////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GetSealedSectorsResponse {
@@ -426,7 +572,6 @@ impl Default for GetSealedSectorsResponse {
 ///////////////////////////////////////////////////////////////////////////////
 /// GetStagedSectorsResponse
 ////////////////////////////
-
 #[repr(C)]
 #[derive(DropStructMacro)]
 pub struct GetStagedSectorsResponse {
